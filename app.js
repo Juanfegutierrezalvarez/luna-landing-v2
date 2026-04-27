@@ -478,6 +478,8 @@ const state = {
   waitlistStep: "invite",
   interestTopic: "",
   pilotInterest: "",
+  whatsappGroupClicked: false,
+  whatsappGroupClickedAt: "",
   cardNotice: "",
   trackedScreens: new Set(),
 };
@@ -528,6 +530,7 @@ const guideContent = {
 };
 
 function trackEvent(eventName, extra = {}) {
+  const resultDetails = state.result?.resultId ? lunarResults[state.result.resultId] : null;
   const payload = {
     session_id: state.sessionId,
     timestamp: new Date().toISOString(),
@@ -537,12 +540,16 @@ function trackEvent(eventName, extra = {}) {
     whatsapp: state.lead.whatsapp,
     answers: state.answers,
     result_id: state.result?.resultId || "",
+    result_phase: resultDetails?.phase || "",
+    result_short_name: resultDetails?.shortName || "",
     secondary_result_id: state.result?.secondaryResultId || "",
     score_gap: state.result?.scoreGap ?? "",
     confidence_score: state.result?.confidenceScore || "",
     phase_scores: state.result?.phaseScores || {},
     guide_downloaded: state.guideDownloaded,
     waitlist_joined: state.waitlistJoined,
+    whatsapp_group_clicked: state.whatsappGroupClicked,
+    whatsapp_group_clicked_at: state.whatsappGroupClickedAt,
     interest_topic: state.interestTopic,
     pilot_interest: state.pilotInterest,
     source_url: window.location.href,
@@ -1057,6 +1064,8 @@ function cardText() {
 }
 
 function openGuideGroup() {
+  state.whatsappGroupClicked = true;
+  state.whatsappGroupClickedAt = new Date().toISOString();
   trackEvent(eventNames.privateGroupClicked, { source: "card_guide_offer", guide: "luna_llena_escorpio_2026_05_01" });
   if (WHATSAPP_PRIVATE_GROUP_URL) {
     window.open(WHATSAPP_PRIVATE_GROUP_URL, "_blank", "noopener,noreferrer");
@@ -1569,6 +1578,8 @@ function renderWaitlistDone() {
       </div>
     `, true);
     document.getElementById("openPrivateGroup").onclick = () => {
+      state.whatsappGroupClicked = true;
+      state.whatsappGroupClickedAt = new Date().toISOString();
       trackEvent(eventNames.privateGroupClicked, { pilot_path: yesCopy ? "yes" : "maybe" });
       if (WHATSAPP_PRIVATE_GROUP_URL) {
         window.open(WHATSAPP_PRIVATE_GROUP_URL, "_blank", "noopener,noreferrer");
