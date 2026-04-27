@@ -208,6 +208,8 @@ function upsertPerson_(spreadsheet, payload) {
   const key = email || sessionId;
   const hasPersonData = Boolean(email || payload.name || payload.whatsapp);
   if (!key || !hasPersonData) return;
+  const clickedWhatsapp = payload.event_name === "whatsapp_private_group_clicked" || Boolean(payload.whatsapp_group_clicked);
+  const whatsappClickedAt = payload.whatsapp_group_clicked_at || (clickedWhatsapp ? payload.timestamp : "");
 
   const sheet = spreadsheet.getSheetByName(SHEET_NAMES.personas);
   const headers = HEADERS.Personas;
@@ -232,8 +234,8 @@ function upsertPerson_(spreadsheet, payload) {
     confidence_score: payload.confidence_score || existing.confidence_score || "",
     score_gap: payload.score_gap ?? existing.score_gap ?? "",
     guide_downloaded: Boolean(payload.guide_downloaded || existing.guide_downloaded),
-    whatsapp_group_clicked: Boolean(payload.whatsapp_group_clicked || existing.whatsapp_group_clicked),
-    whatsapp_group_clicked_at: payload.whatsapp_group_clicked_at || existing.whatsapp_group_clicked_at || "",
+    whatsapp_group_clicked: Boolean(clickedWhatsapp || existing.whatsapp_group_clicked),
+    whatsapp_group_clicked_at: whatsappClickedAt || existing.whatsapp_group_clicked_at || "",
     whatsapp_click_source: payload.source || payload.pilot_path || existing.whatsapp_click_source || "",
     waitlist_joined: Boolean(payload.waitlist_joined || existing.waitlist_joined),
     interest_topic: payload.interest_topic || existing.interest_topic || "",
