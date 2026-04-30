@@ -40,6 +40,7 @@ const eventNames = {
 };
 
 const sheetEventNames = new Set([
+  eventNames.landingViewed,
   eventNames.signalAnswered,
   eventNames.signalFlowCompleted,
   eventNames.leadSubmitted,
@@ -465,6 +466,7 @@ Object.entries(resultEnhancements).forEach(([resultId, enhancement]) => {
 
 const state = {
   screen: "landing",
+  userId: getOrCreateUserId(),
   sessionId: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
   questionIndex: 0,
   answers: [],
@@ -490,6 +492,16 @@ const state = {
   cardNotice: "",
   trackedScreens: new Set(),
 };
+
+function getOrCreateUserId() {
+  const storageKey = "luna_usuario_id";
+  const existing = localStorage.getItem(storageKey);
+  if (existing) return existing;
+
+  const id = crypto.randomUUID ? crypto.randomUUID() : `usuario_${Date.now()}`;
+  localStorage.setItem(storageKey, id);
+  return id;
+}
 
 const app = document.getElementById("app");
 const brand = {
@@ -539,6 +551,8 @@ const guideContent = {
 function trackEvent(eventName, extra = {}) {
   const resultDetails = state.result?.resultId ? lunarResults[state.result.resultId] : null;
   const payload = {
+    usuario_id: state.userId,
+    intento_id: state.sessionId,
     session_id: state.sessionId,
     timestamp: new Date().toISOString(),
     event_name: eventName,
