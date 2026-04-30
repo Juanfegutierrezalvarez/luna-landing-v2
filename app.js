@@ -40,6 +40,8 @@ const eventNames = {
 };
 
 const sheetEventNames = new Set([
+  eventNames.signalAnswered,
+  eventNames.signalFlowCompleted,
   eventNames.leadSubmitted,
   eventNames.privateGroupClicked,
 ]);

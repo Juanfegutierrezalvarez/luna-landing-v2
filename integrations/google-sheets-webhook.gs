@@ -6,15 +6,18 @@ const SHEET_NAMES = {
 };
 
 const TRACKED_EVENTS = {
+  signalAnswered: "signal_answered",
+  signalFlowCompleted: "signal_flow_completed",
   leadSubmitted: "lead_submitted",
   whatsappClicked: "whatsapp_private_group_clicked",
 };
 
 const HEADERS = {
   "Personas V2": [
-    "persona_key",
+    "session_id",
     "first_seen_at",
     "last_seen_at",
+    "contact_status",
     "name",
     "email",
     "whatsapp",
@@ -23,17 +26,21 @@ const HEADERS = {
     "result_short_name",
     "confidence_score",
     "score_gap",
+    "answers_count",
+    "last_signal_answered",
+    "quiz_completed",
+    "quiz_completed_at",
     "whatsapp_group_clicked",
     "whatsapp_group_clicked_at",
     "source_url",
-    "session_id",
   ],
   "Respuestas V2": [
     "received_at",
-    "persona_key",
     "session_id",
+    "contact_status",
     "name",
     "email",
+    "whatsapp",
     "result_id",
     "result_phase",
     "question_number",
@@ -55,7 +62,7 @@ function doGet() {
   setup();
   return jsonResponse_({
     ok: true,
-    message: "Webhook Luna Landing V2 listo. Solo guarda Personas V2 y Respuestas V2.",
+    message: "Webhook Luna Landing V2 listo. Guarda Personas V2 y Respuestas V2.",
   });
 }
 
@@ -67,22 +74,17 @@ function doPost(event) {
     const payload = parsePayload_(event);
     const eventName = payload.event_name || "";
 
-    if (![TRACKED_EVENTS.leadSubmitted, TRACKED_EVENTS.whatsappClicked].includes(eventName)) {
+    if (!Object.values(TRACKED_EVENTS).includes(eventName)) {
       return jsonResponse_({ ok: true, ignored: true });
     }
 
     const spreadsheet = getSpreadsheet_();
     ensureSheets_(spreadsheet);
 
-    const personResult = upsertPerson_(spreadsheet, payload);
+    const sessionResult = upsertSession_(spreadsheet, payload);
 
-    if (
-      personResult &&
-      Array.isArray(payload.answers) &&
-      payload.answers.length &&
-      (eventName === TRACKED_EVENTS.leadSubmitted || personResult.created)
-    ) {
-      appendAnswers_(spreadsheet, payload, personResult.personaKey);
+    if (sessionResult && Array.isArray(payload.answers) && payload.answers.length) {
+      syncAnswers_(spreadsheet, payload, sessionResult.sessionId);
     }
 
     return jsonResponse_({ ok: true });
@@ -121,31 +123,36 @@ function ensureSheets_(spreadsheet) {
   });
 }
 
-function upsertPerson_(spreadsheet, payload) {
+function upsertSession_(spreadsheet, payload) {
   const email = normalizeEmail_(payload.email);
   const whatsapp = normalizePhone_(payload.whatsapp);
-  const sessionId = payload.session_id || "";
-  const personaKey = email || whatsapp || sessionId;
-
-  if (!personaKey || !hasPersonSignal_(payload)) return null;
+  const sessionId = payload.session_id || email || whatsapp;
+  if (!sessionId || !hasSessionSignal_(payload)) return null;
 
   const sheet = spreadsheet.getSheetByName(SHEET_NAMES.personas);
   const headers = HEADERS[SHEET_NAMES.personas];
   const lastRow = sheet.getLastRow();
   const keys = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat() : [];
-  const foundIndex = keys.findIndex((value) => value === personaKey);
+  const foundIndex = keys.findIndex((value) => value === sessionId);
   const targetRow = foundIndex >= 0 ? foundIndex + 2 : lastRow + 1;
   const existing = foundIndex >= 0
     ? rowObject_(headers, sheet.getRange(targetRow, 1, 1, headers.length).getValues()[0])
     : {};
 
-  const clickedWhatsapp = payload.event_name === TRACKED_EVENTS.whatsappClicked || toBool_(payload.whatsapp_group_clicked);
+  const eventName = payload.event_name || "";
+  const hasContact = Boolean(payload.name || email || whatsapp || existing.email || existing.whatsapp);
+  const answersCount = Array.isArray(payload.answers) ? payload.answers.length : Number(existing.answers_count || 0);
+  const lastSignal = payload.signal_number || answersCount || existing.last_signal_answered || "";
+  const quizCompleted = eventName === TRACKED_EVENTS.signalFlowCompleted || toBool_(existing.quiz_completed) || Boolean(payload.result_id || existing.result_id);
+  const quizCompletedAt = existing.quiz_completed_at || (eventName === TRACKED_EVENTS.signalFlowCompleted ? receivedAt_(payload) : "");
+  const clickedWhatsapp = eventName === TRACKED_EVENTS.whatsappClicked || toBool_(payload.whatsapp_group_clicked);
   const clickedAt = payload.whatsapp_group_clicked_at || (clickedWhatsapp ? payload.timestamp : "");
 
   const next = {
-    persona_key: personaKey,
+    session_id: sessionId,
     first_seen_at: existing.first_seen_at || receivedAt_(payload),
     last_seen_at: receivedAt_(payload),
+    contact_status: hasContact ? "contact" : "anonymous",
     name: payload.name || existing.name || "",
     email: email || existing.email || "",
     whatsapp: whatsapp || existing.whatsapp || "",
@@ -154,52 +161,89 @@ function upsertPerson_(spreadsheet, payload) {
     result_short_name: payload.result_short_name || existing.result_short_name || "",
     confidence_score: payload.confidence_score || existing.confidence_score || "",
     score_gap: payload.score_gap ?? existing.score_gap ?? "",
+    answers_count: Math.max(Number(existing.answers_count || 0), Number(answersCount || 0)),
+    last_signal_answered: lastSignal,
+    quiz_completed: quizCompleted,
+    quiz_completed_at: quizCompletedAt,
     whatsapp_group_clicked: clickedWhatsapp || toBool_(existing.whatsapp_group_clicked),
     whatsapp_group_clicked_at: clickedAt || existing.whatsapp_group_clicked_at || "",
     source_url: payload.source_url || existing.source_url || "",
-    session_id: sessionId || existing.session_id || "",
   };
 
   sheet.getRange(targetRow, 1, 1, headers.length).setValues([headers.map((header) => next[header] ?? "")]);
 
-  return {
-    personaKey,
-    created: foundIndex < 0,
-  };
+  return { sessionId };
 }
 
-function appendAnswers_(spreadsheet, payload, personaKey) {
+function syncAnswers_(spreadsheet, payload, sessionId) {
   const answers = Array.isArray(payload.answers) ? payload.answers : [];
   if (!answers.length) return;
 
-  const email = normalizeEmail_(payload.email);
-  const rows = answers.map((answer, index) => [
-    receivedAt_(payload),
-    personaKey,
-    payload.session_id || "",
-    payload.name || "",
-    email,
-    payload.result_id || "",
-    payload.result_phase || "",
-    index + 1,
-    answer.questionId || "",
-    answer.questionLabel || "",
-    answer.optionId || "",
-    answer.label || "",
-    answer.primary || "",
-    stringify_(answer.weights),
-  ]);
-
   const sheet = spreadsheet.getSheetByName(SHEET_NAMES.respuestas);
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  const headers = HEADERS[SHEET_NAMES.respuestas];
+  const lastRow = sheet.getLastRow();
+  const existingRange = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, headers.length) : null;
+  const existingRows = existingRange ? existingRange.getValues() : [];
+  const existingByKey = {};
+
+  existingRows.forEach((row, index) => {
+    const existingSessionId = row[columnIndex_(headers, "session_id")];
+    const existingQuestionId = row[columnIndex_(headers, "question_id")];
+    if (existingSessionId && existingQuestionId) {
+      existingByKey[`${existingSessionId}::${existingQuestionId}`] = {
+        rowNumber: index + 2,
+        row,
+      };
+    }
+  });
+
+  const email = normalizeEmail_(payload.email);
+  const whatsapp = normalizePhone_(payload.whatsapp);
+  const contactStatus = payload.name || email || whatsapp ? "contact" : "anonymous";
+  const newRows = [];
+
+  answers.forEach((answer, index) => {
+    const questionId = answer.questionId || `signal_${String(index + 1).padStart(2, "0")}`;
+    const key = `${sessionId}::${questionId}`;
+    const existing = existingByKey[key];
+    const row = existing ? existing.row : Array(headers.length).fill("");
+
+    setRowValue_(row, headers, "received_at", row[columnIndex_(headers, "received_at")] || receivedAt_(payload));
+    setRowValue_(row, headers, "session_id", sessionId);
+    setRowValue_(row, headers, "contact_status", contactStatus === "contact" ? "contact" : row[columnIndex_(headers, "contact_status")] || "anonymous");
+    setRowValue_(row, headers, "name", payload.name || row[columnIndex_(headers, "name")] || "");
+    setRowValue_(row, headers, "email", email || row[columnIndex_(headers, "email")] || "");
+    setRowValue_(row, headers, "whatsapp", whatsapp || row[columnIndex_(headers, "whatsapp")] || "");
+    setRowValue_(row, headers, "result_id", payload.result_id || row[columnIndex_(headers, "result_id")] || "");
+    setRowValue_(row, headers, "result_phase", payload.result_phase || row[columnIndex_(headers, "result_phase")] || "");
+    setRowValue_(row, headers, "question_number", index + 1);
+    setRowValue_(row, headers, "question_id", questionId);
+    setRowValue_(row, headers, "question_text", answer.questionLabel || "");
+    setRowValue_(row, headers, "answer_id", answer.optionId || "");
+    setRowValue_(row, headers, "answer_text", answer.label || "");
+    setRowValue_(row, headers, "primary_phase", answer.primary || "");
+    setRowValue_(row, headers, "weights_json", stringify_(answer.weights));
+
+    if (existing) {
+      sheet.getRange(existing.rowNumber, 1, 1, headers.length).setValues([row]);
+    } else {
+      newRows.push(row);
+    }
+  });
+
+  if (newRows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, headers.length).setValues(newRows);
+  }
 }
 
-function hasPersonSignal_(payload) {
+function hasSessionSignal_(payload) {
   return Boolean(
+    payload.session_id ||
     payload.name ||
     payload.email ||
     payload.whatsapp ||
     payload.result_id ||
+    Array.isArray(payload.answers) ||
     payload.event_name === TRACKED_EVENTS.whatsappClicked
   );
 }
@@ -209,6 +253,14 @@ function rowObject_(headers, row) {
     result[header] = row[index];
     return result;
   }, {});
+}
+
+function columnIndex_(headers, name) {
+  return headers.indexOf(name);
+}
+
+function setRowValue_(row, headers, name, value) {
+  row[columnIndex_(headers, name)] = value;
 }
 
 function receivedAt_(payload) {
