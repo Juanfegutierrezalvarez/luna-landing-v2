@@ -1,47 +1,75 @@
 # Google Sheets para Luna Landing V2
 
-Esta version guarda solo lo que hoy sirve para negocio y analisis:
+Esta version deja de intentar reparar las pestanas antiguas. `Personas`, `Leads` y `Eventos` quedan como historico parcial, pero no deben usarse como fuente de verdad porque la captura anterior ya venia incompleta.
 
-- `Personas V2`: una fila por sesion/persona, incluso si no dejo datos de contacto.
-- `Respuestas V2`: una fila por cada respuesta del ritual, relacionada con la persona.
+Desde ahora la captura correcta vive en tres pestanas nuevas y aisladas:
 
-No guarda una pestana de eventos. La landing solo envia al Sheet:
+- `Sesiones V3`: cada avance importante de una sesion, incluso si la usuaria no deja contacto.
+- `Respuestas V3`: una fila por cada respuesta a las 7 senales, relacionada por `session_id`.
+- `Contactos V3`: solo momentos comerciales claros: cuando deja datos o cuando toca el boton para entrar a WhatsApp.
 
-- `lead_submitted`: cuando la usuaria deja nombre/correo/WhatsApp.
-- `whatsapp_private_group_clicked`: cuando toca el boton para entrar al grupo.
+## Que se guarda
+
+La landing solo envia al Google Sheet estos eventos:
+
 - `signal_answered`: cada vez que responde una senal.
 - `signal_flow_completed`: cuando responde las 7 senales y ya existe resultado.
+- `lead_submitted`: cuando deja nombre, correo o WhatsApp.
+- `whatsapp_private_group_clicked`: cuando toca el boton para entrar al grupo.
+
+Esto permite analizar patrones aunque la persona abandone antes de dejar datos.
 
 ## Por que se cambio
 
-La version anterior podia sentirse como si borrara datos porque `Personas` se actualizaba calculando la ultima fila disponible. Si varias usuarias enviaban datos al mismo tiempo, dos escrituras podian intentar usar la misma fila. Esta version usa `LockService`, que pone una fila en espera mientras otra termina de escribirse.
+El sistema anterior no servia como base confiable para el negocio:
 
-Tambien se redujo el volumen: ya no se mandan todos los eventos del recorrido al Google Sheet. Solo guardamos respuestas, sesiones con resultado, contactos y clics de WhatsApp.
+- habia filas historicas incompletas;
+- muchas usuarias pudieron entrar antes de que el webhook o Vercel estuvieran estables;
+- `Personas` y `Leads` mezclaban sesiones anonimas, contactos y resultados;
+- algunas filas se actualizaban sobre la misma sesion, lo que hacia dificil auditar el recorrido;
+- WhatsApp no puede reconstruirse hacia atras si el clic no fue guardado en el momento.
+
+La version V3 es mas simple: escribe hacia adelante, separa sesiones/respuestas/contactos y usa `LockService` para evitar choques si varias personas responden al mismo tiempo. No reescribe respuestas antiguas; todo se relaciona por `session_id`.
 
 ## Estructura
 
-`Personas V2` incluye:
+`Sesiones V3` incluye:
 
+- fecha de recepcion,
 - `session_id`,
-- estado de contacto: `anonymous` o `contact`,
-- datos de contacto,
-- resultado lunar,
-- nivel de confianza,
-- cuantas senales respondio,
+- checkpoint de avance,
+- numero de respuestas,
 - ultima senal respondida,
-- si hizo clic para entrar al grupo de WhatsApp,
-- fecha del clic,
-- enlace de origen.
-
-`Respuestas V2` incluye:
-
-- `session_id` relacionado,
+- si completo el ritual,
 - estado de contacto,
+- datos de contacto si existen,
+- resultado lunar,
+- confianza del resultado,
+- si hizo clic a WhatsApp,
+- URL de origen.
+
+`Respuestas V3` incluye:
+
+- fecha de recepcion,
+- `session_id`,
+- numero de pregunta,
 - pregunta,
 - respuesta,
 - fase principal asociada,
 - pesos de la respuesta,
-- resultado final.
+- URL de origen.
+
+El resultado y el contacto no se duplican aqui para mantener la hoja liviana. Se cruzan con `Sesiones V3` y `Contactos V3` usando `session_id`.
+
+`Contactos V3` incluye:
+
+- fecha de recepcion,
+- `session_id`,
+- tipo de evento: `lead_submitted` o `whatsapp_clicked`,
+- nombre, correo y WhatsApp si existen,
+- resultado lunar,
+- fecha del clic a WhatsApp si aplica,
+- URL de origen.
 
 ## Instalacion
 
@@ -61,17 +89,24 @@ Tambien se redujo el volumen: ya no se mandan todos los eventos del recorrido al
 
 La URL del webhook no deberia cambiar si actualizas la implementacion existente.
 
+Al abrir la URL del webhook debe verse este mensaje:
+
+```json
+{"ok":true,"message":"Webhook Luna Landing V2 listo. Guarda Sesiones V3, Respuestas V3 y Contactos V3."}
+```
+
 ## Prueba
 
 1. Abre `https://luna-landing-v2.vercel.app`.
-2. Responde 2 o 3 senales y revisa que aparezca una fila `anonymous` en `Personas V2`.
-3. Revisa que `Respuestas V2` tenga una fila por cada senal respondida.
-4. Completa las 7 senales sin dejar datos todavia.
-5. Revisa que esa misma sesion tenga `answers_count = 7` y `quiz_completed = TRUE`.
-6. Ahora deja un correo de prueba.
-7. Entra al grupo de WhatsApp desde el boton.
-8. Revisa:
-   - `Personas V2`: debe seguir existiendo una sola fila para esa sesion.
-   - `contact_status`: debe pasar de `anonymous` a `contact`.
-   - `whatsapp_group_clicked`: debe estar en `TRUE`.
-   - `Respuestas V2`: deben mantenerse 7 filas, ahora con nombre/correo si se capturaron.
+2. Responde una senal.
+3. Revisa que aparezca una fila en `Sesiones V3` y una fila en `Respuestas V3`.
+4. Completa las 7 senales.
+5. Revisa que `Sesiones V3` tenga un checkpoint `quiz_completed`.
+6. Deja un contacto de prueba.
+7. Revisa que `Contactos V3` tenga una fila `lead_submitted`.
+8. Toca el boton de WhatsApp.
+9. Revisa que `Contactos V3` tenga una fila `whatsapp_clicked`.
+
+## Nota importante
+
+No se deben borrar ni restaurar las pestanas viejas como parte del arreglo. La fuente confiable empieza desde `Sesiones V3`, `Respuestas V3` y `Contactos V3` despues de implementar esta version del Apps Script y redesplegar Vercel. A partir de ese momento, cada nueva respuesta queda registrada aunque la usuaria no deje datos de contacto.
