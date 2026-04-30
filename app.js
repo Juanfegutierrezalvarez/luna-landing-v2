@@ -39,6 +39,11 @@ const eventNames = {
   completed: "experience_completed",
 };
 
+const sheetEventNames = new Set([
+  eventNames.leadSubmitted,
+  eventNames.privateGroupClicked,
+]);
+
 const quizQuestions = [
   {
     id: "signal_01",
@@ -560,15 +565,26 @@ function trackEvent(eventName, extra = {}) {
   localEvents.push(payload);
   localStorage.setItem("luna_events", JSON.stringify(localEvents));
 
-  if (WEBHOOK_URL) {
-    fetch(WEBHOOK_URL, {
-      method: "POST",
-      mode: "no-cors",
-      keepalive: true,
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload),
-    }).catch(() => undefined);
+  if (WEBHOOK_URL && sheetEventNames.has(eventName)) {
+    sendWebhookPayload(payload);
   }
+}
+
+function sendWebhookPayload(payload) {
+  const body = JSON.stringify(payload);
+
+  if (navigator.sendBeacon) {
+    const blob = new Blob([body], { type: "text/plain;charset=UTF-8" });
+    if (navigator.sendBeacon(WEBHOOK_URL, blob)) return;
+  }
+
+  fetch(WEBHOOK_URL, {
+    method: "POST",
+    mode: "no-cors",
+    keepalive: true,
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body,
+  }).catch(() => undefined);
 }
 
 window.exportLocalEventsForDebug = function exportLocalEventsForDebug() {

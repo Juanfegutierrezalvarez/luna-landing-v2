@@ -1,14 +1,17 @@
-const SPREADSHEET_ID = "";
+const SPREADSHEET_ID = "11xbuVKbFeLIRav0dMg7eHEUjEVLvTDQ-MDpoLudx1uA";
 
 const SHEET_NAMES = {
-  personas: "Personas",
-  leads: "Leads",
-  respuestas: "Respuestas",
-  eventos: "Eventos",
+  personas: "Personas V2",
+  respuestas: "Respuestas V2",
+};
+
+const TRACKED_EVENTS = {
+  leadSubmitted: "lead_submitted",
+  whatsappClicked: "whatsapp_private_group_clicked",
 };
 
 const HEADERS = {
-  Personas: [
+  "Personas V2": [
     "persona_key",
     "first_seen_at",
     "last_seen_at",
@@ -18,67 +21,28 @@ const HEADERS = {
     "result_id",
     "result_phase",
     "result_short_name",
-    "secondary_result_id",
     "confidence_score",
     "score_gap",
-    "guide_downloaded",
     "whatsapp_group_clicked",
     "whatsapp_group_clicked_at",
-    "whatsapp_click_source",
-    "waitlist_joined",
-    "interest_topic",
-    "pilot_interest",
     "source_url",
     "session_id",
   ],
-  Leads: [
+  "Respuestas V2": [
     "received_at",
+    "persona_key",
     "session_id",
     "name",
     "email",
-    "whatsapp",
     "result_id",
     "result_phase",
-    "result_short_name",
-    "secondary_result_id",
-    "confidence_score",
-    "score_gap",
-    "phase_scores_json",
-    "guide_downloaded",
-    "whatsapp_group_clicked",
-    "whatsapp_group_clicked_at",
-    "waitlist_joined",
-    "source_url",
-  ],
-  Respuestas: [
-    "received_at",
-    "session_id",
-    "name",
-    "email",
+    "question_number",
     "question_id",
-    "question_label",
+    "question_text",
     "answer_id",
-    "answer_label",
+    "answer_text",
     "primary_phase",
     "weights_json",
-    "result_id",
-  ],
-  Eventos: [
-    "received_at",
-    "session_id",
-    "event_name",
-    "name",
-    "email",
-    "whatsapp",
-    "result_id",
-    "guide_downloaded",
-    "whatsapp_group_clicked",
-    "whatsapp_group_clicked_at",
-    "waitlist_joined",
-    "interest_topic",
-    "pilot_interest",
-    "source_url",
-    "raw_json",
   ],
 };
 
@@ -89,28 +53,48 @@ function setup() {
 
 function doGet() {
   setup();
-  return jsonResponse_({ ok: true, message: "Luna landing webhook listo." });
+  return jsonResponse_({
+    ok: true,
+    message: "Webhook Luna Landing V2 listo. Solo guarda Personas V2 y Respuestas V2.",
+  });
 }
 
 function doPost(event) {
-  const payload = parsePayload_(event);
-  const spreadsheet = getSpreadsheet_();
-  ensureSheets_(spreadsheet);
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
 
-  appendEvent_(spreadsheet, payload);
-  upsertPerson_(spreadsheet, payload);
+  try {
+    const payload = parsePayload_(event);
+    const eventName = payload.event_name || "";
 
-  if (payload.event_name === "lead_submitted") {
-    appendLead_(spreadsheet, payload);
-    appendAnswers_(spreadsheet, payload);
+    if (![TRACKED_EVENTS.leadSubmitted, TRACKED_EVENTS.whatsappClicked].includes(eventName)) {
+      return jsonResponse_({ ok: true, ignored: true });
+    }
+
+    const spreadsheet = getSpreadsheet_();
+    ensureSheets_(spreadsheet);
+
+    const personResult = upsertPerson_(spreadsheet, payload);
+
+    if (
+      personResult &&
+      Array.isArray(payload.answers) &&
+      payload.answers.length &&
+      (eventName === TRACKED_EVENTS.leadSubmitted || personResult.created)
+    ) {
+      appendAnswers_(spreadsheet, payload, personResult.personaKey);
+    }
+
+    return jsonResponse_({ ok: true });
+  } catch (error) {
+    return jsonResponse_({ ok: false, error: String(error) });
+  } finally {
+    lock.releaseLock();
   }
-
-  return jsonResponse_({ ok: true });
 }
 
 function getSpreadsheet_() {
-  if (SPREADSHEET_ID) return SpreadsheetApp.openById(SPREADSHEET_ID);
-  return SpreadsheetApp.getActiveSpreadsheet();
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
 }
 
 function parsePayload_(event) {
@@ -126,11 +110,10 @@ function ensureSheets_(spreadsheet) {
   Object.values(SHEET_NAMES).forEach((name) => {
     const sheet = spreadsheet.getSheetByName(name) || spreadsheet.insertSheet(name);
     const headers = HEADERS[name];
-    if (!headers) return;
-
     const existing = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-    const hasHeaders = existing.some((value) => value);
-    if (!hasHeaders) {
+    const sameHeaders = headers.every((header, index) => existing[index] === header);
+
+    if (!sameHeaders) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.setFrozenRows(1);
       sheet.autoResizeColumns(1, headers.length);
@@ -138,113 +121,87 @@ function ensureSheets_(spreadsheet) {
   });
 }
 
-function appendLead_(spreadsheet, payload) {
-  spreadsheet.getSheetByName(SHEET_NAMES.leads).appendRow([
-    receivedAt_(payload),
-    payload.session_id || "",
-    payload.name || "",
-    normalizeEmail_(payload.email),
-    payload.whatsapp || "",
-    payload.result_id || "",
-    payload.result_phase || "",
-    payload.result_short_name || "",
-    payload.secondary_result_id || "",
-    payload.confidence_score || "",
-    payload.score_gap ?? "",
-    stringify_(payload.phase_scores),
-    Boolean(payload.guide_downloaded),
-    Boolean(payload.whatsapp_group_clicked),
-    payload.whatsapp_group_clicked_at || "",
-    Boolean(payload.waitlist_joined),
-    payload.source_url || "",
-  ]);
+function upsertPerson_(spreadsheet, payload) {
+  const email = normalizeEmail_(payload.email);
+  const whatsapp = normalizePhone_(payload.whatsapp);
+  const sessionId = payload.session_id || "";
+  const personaKey = email || whatsapp || sessionId;
+
+  if (!personaKey || !hasPersonSignal_(payload)) return null;
+
+  const sheet = spreadsheet.getSheetByName(SHEET_NAMES.personas);
+  const headers = HEADERS[SHEET_NAMES.personas];
+  const lastRow = sheet.getLastRow();
+  const keys = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat() : [];
+  const foundIndex = keys.findIndex((value) => value === personaKey);
+  const targetRow = foundIndex >= 0 ? foundIndex + 2 : lastRow + 1;
+  const existing = foundIndex >= 0
+    ? rowObject_(headers, sheet.getRange(targetRow, 1, 1, headers.length).getValues()[0])
+    : {};
+
+  const clickedWhatsapp = payload.event_name === TRACKED_EVENTS.whatsappClicked || toBool_(payload.whatsapp_group_clicked);
+  const clickedAt = payload.whatsapp_group_clicked_at || (clickedWhatsapp ? payload.timestamp : "");
+
+  const next = {
+    persona_key: personaKey,
+    first_seen_at: existing.first_seen_at || receivedAt_(payload),
+    last_seen_at: receivedAt_(payload),
+    name: payload.name || existing.name || "",
+    email: email || existing.email || "",
+    whatsapp: whatsapp || existing.whatsapp || "",
+    result_id: payload.result_id || existing.result_id || "",
+    result_phase: payload.result_phase || existing.result_phase || "",
+    result_short_name: payload.result_short_name || existing.result_short_name || "",
+    confidence_score: payload.confidence_score || existing.confidence_score || "",
+    score_gap: payload.score_gap ?? existing.score_gap ?? "",
+    whatsapp_group_clicked: clickedWhatsapp || toBool_(existing.whatsapp_group_clicked),
+    whatsapp_group_clicked_at: clickedAt || existing.whatsapp_group_clicked_at || "",
+    source_url: payload.source_url || existing.source_url || "",
+    session_id: sessionId || existing.session_id || "",
+  };
+
+  sheet.getRange(targetRow, 1, 1, headers.length).setValues([headers.map((header) => next[header] ?? "")]);
+
+  return {
+    personaKey,
+    created: foundIndex < 0,
+  };
 }
 
-function appendAnswers_(spreadsheet, payload) {
+function appendAnswers_(spreadsheet, payload, personaKey) {
   const answers = Array.isArray(payload.answers) ? payload.answers : [];
   if (!answers.length) return;
 
-  const rows = answers.map((answer) => [
+  const email = normalizeEmail_(payload.email);
+  const rows = answers.map((answer, index) => [
     receivedAt_(payload),
+    personaKey,
     payload.session_id || "",
     payload.name || "",
-    normalizeEmail_(payload.email),
+    email,
+    payload.result_id || "",
+    payload.result_phase || "",
+    index + 1,
     answer.questionId || "",
     answer.questionLabel || "",
     answer.optionId || "",
     answer.label || "",
     answer.primary || "",
     stringify_(answer.weights),
-    payload.result_id || "",
   ]);
 
   const sheet = spreadsheet.getSheetByName(SHEET_NAMES.respuestas);
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
 }
 
-function appendEvent_(spreadsheet, payload) {
-  spreadsheet.getSheetByName(SHEET_NAMES.eventos).appendRow([
-    receivedAt_(payload),
-    payload.session_id || "",
-    payload.event_name || "",
-    payload.name || "",
-    normalizeEmail_(payload.email),
-    payload.whatsapp || "",
-    payload.result_id || "",
-    Boolean(payload.guide_downloaded),
-    Boolean(payload.whatsapp_group_clicked),
-    payload.whatsapp_group_clicked_at || "",
-    Boolean(payload.waitlist_joined),
-    payload.interest_topic || "",
-    payload.pilot_interest || "",
-    payload.source_url || "",
-    stringify_(payload),
-  ]);
-}
-
-function upsertPerson_(spreadsheet, payload) {
-  const email = normalizeEmail_(payload.email);
-  const sessionId = payload.session_id || "";
-  const key = email || sessionId;
-  const hasPersonData = Boolean(email || payload.name || payload.whatsapp);
-  if (!key || !hasPersonData) return;
-  const clickedWhatsapp = payload.event_name === "whatsapp_private_group_clicked" || Boolean(payload.whatsapp_group_clicked);
-  const whatsappClickedAt = payload.whatsapp_group_clicked_at || (clickedWhatsapp ? payload.timestamp : "");
-
-  const sheet = spreadsheet.getSheetByName(SHEET_NAMES.personas);
-  const headers = HEADERS.Personas;
-  const keyColumn = 1;
-  const lastRow = sheet.getLastRow();
-  const keys = lastRow > 1 ? sheet.getRange(2, keyColumn, lastRow - 1, 1).getValues().flat() : [];
-  const foundIndex = keys.findIndex((value) => value === key);
-  const targetRow = foundIndex >= 0 ? foundIndex + 2 : lastRow + 1;
-  const existing = foundIndex >= 0 ? rowObject_(headers, sheet.getRange(targetRow, 1, 1, headers.length).getValues()[0]) : {};
-
-  const next = {
-    persona_key: key,
-    first_seen_at: existing.first_seen_at || receivedAt_(payload),
-    last_seen_at: receivedAt_(payload),
-    name: payload.name || existing.name || "",
-    email: email || existing.email || "",
-    whatsapp: payload.whatsapp || existing.whatsapp || "",
-    result_id: payload.result_id || existing.result_id || "",
-    result_phase: payload.result_phase || existing.result_phase || "",
-    result_short_name: payload.result_short_name || existing.result_short_name || "",
-    secondary_result_id: payload.secondary_result_id || existing.secondary_result_id || "",
-    confidence_score: payload.confidence_score || existing.confidence_score || "",
-    score_gap: payload.score_gap ?? existing.score_gap ?? "",
-    guide_downloaded: Boolean(payload.guide_downloaded || existing.guide_downloaded),
-    whatsapp_group_clicked: Boolean(clickedWhatsapp || existing.whatsapp_group_clicked),
-    whatsapp_group_clicked_at: whatsappClickedAt || existing.whatsapp_group_clicked_at || "",
-    whatsapp_click_source: payload.source || payload.pilot_path || existing.whatsapp_click_source || "",
-    waitlist_joined: Boolean(payload.waitlist_joined || existing.waitlist_joined),
-    interest_topic: payload.interest_topic || existing.interest_topic || "",
-    pilot_interest: payload.pilot_interest || existing.pilot_interest || "",
-    source_url: payload.source_url || existing.source_url || "",
-    session_id: sessionId || existing.session_id || "",
-  };
-
-  sheet.getRange(targetRow, 1, 1, headers.length).setValues([headers.map((header) => next[header] ?? "")]);
+function hasPersonSignal_(payload) {
+  return Boolean(
+    payload.name ||
+    payload.email ||
+    payload.whatsapp ||
+    payload.result_id ||
+    payload.event_name === TRACKED_EVENTS.whatsappClicked
+  );
 }
 
 function rowObject_(headers, row) {
@@ -260,6 +217,14 @@ function receivedAt_(payload) {
 
 function normalizeEmail_(email) {
   return String(email || "").trim().toLowerCase();
+}
+
+function normalizePhone_(phone) {
+  return String(phone || "").trim();
+}
+
+function toBool_(value) {
+  return value === true || String(value).toUpperCase() === "TRUE";
 }
 
 function stringify_(value) {

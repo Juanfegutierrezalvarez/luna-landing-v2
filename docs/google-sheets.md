@@ -1,59 +1,66 @@
 # Google Sheets para Luna Landing V2
 
-Este setup guarda los datos de la landing en un Google Sheet con cuatro pestanas:
+Esta version guarda solo lo que hoy sirve para negocio y analisis:
 
-- `Personas`: una fila por persona. Es la vista limpia para seguimiento.
-- `Leads`: una fila cada vez que alguien deja sus datos.
-- `Respuestas`: todas las respuestas del quiz, una fila por respuesta.
-- `Eventos`: todo el recorrido de la usuaria para revisar abandono y conversion.
+- `Personas V2`: una fila por persona que dejo sus datos o entro a WhatsApp.
+- `Respuestas V2`: una fila por cada respuesta del ritual, relacionada con la persona.
 
-Nota importante: WhatsApp no confirma desde fuera si una persona acepto entrar al grupo. La columna `whatsapp_group_clicked` marca si hizo clic en el boton para entrar a WhatsApp.
+No guarda una pestana de eventos. La landing solo envia al Sheet:
 
-## 1. Crear el Google Sheet
+- `lead_submitted`: cuando la usuaria deja nombre/correo/WhatsApp.
+- `whatsapp_private_group_clicked`: cuando toca el boton para entrar al grupo.
 
-1. Crea un Google Sheet llamado `Luna Landing V2 - Datos`.
+## Por que se cambio
+
+La version anterior podia sentirse como si borrara datos porque `Personas` se actualizaba calculando la ultima fila disponible. Si varias usuarias enviaban datos al mismo tiempo, dos escrituras podian intentar usar la misma fila. Esta version usa `LockService`, que pone una fila en espera mientras otra termina de escribirse.
+
+Tambien se redujo el volumen: ya no se mandan todos los eventos del recorrido al Google Sheet.
+
+## Estructura
+
+`Personas V2` incluye:
+
+- datos de contacto,
+- resultado lunar,
+- nivel de confianza,
+- si hizo clic para entrar al grupo de WhatsApp,
+- fecha del clic,
+- enlace de origen,
+- `session_id`.
+
+`Respuestas V2` incluye:
+
+- persona relacionada,
+- pregunta,
+- respuesta,
+- fase principal asociada,
+- pesos de la respuesta,
+- resultado final.
+
+## Instalacion
+
+1. Abre el Google Sheet de Luna Landing V2.
 2. Ve a `Extensiones > Apps Script`.
-3. Borra el contenido inicial.
-4. Pega el contenido de `integrations/google-sheets-webhook.gs`.
-5. Guarda el proyecto.
-6. Ejecuta la funcion `setup`.
-7. Acepta permisos.
+3. Reemplaza todo el codigo por `integrations/google-sheets-webhook.gs`.
+4. Guarda.
+5. Ejecuta `setup`.
+6. Acepta permisos si Google los pide.
+7. Ve a `Implementar > Gestionar implementaciones`.
+8. Edita la implementacion web actual.
+9. Crea una nueva version.
+10. Mantén:
+    - `Ejecutar como`: `Yo`.
+    - `Quien tiene acceso`: `Cualquier persona`.
+11. Actualiza la implementacion.
 
-El script crea estas pestanas automaticamente: `Personas`, `Leads`, `Respuestas` y `Eventos`.
+La URL del webhook no deberia cambiar si actualizas la implementacion existente.
 
-## 2. Publicar el webhook
-
-1. En Apps Script, ve a `Deploy > New deployment`.
-2. Tipo: `Web app`.
-3. Configura:
-   - `Execute as`: `Me`.
-   - `Who has access`: `Anyone`.
-4. Haz deploy.
-5. Copia la `Web app URL`.
-
-## 3. Conectar Vercel
-
-En Vercel, abre el proyecto `luna-landing-v2`:
-
-1. Ve a `Settings > Environment Variables`.
-2. Crea esta variable:
-
-```text
-LUNA_WEBHOOK_URL
-```
-
-3. Pega como valor la `Web app URL` de Apps Script.
-4. Asegurate de activarla en `Production`, `Preview` y `Development`.
-5. Guarda y redeploya.
-
-## 4. Probar
+## Prueba
 
 1. Abre `https://luna-landing-v2.vercel.app`.
-2. Completa la experiencia hasta dejar nombre y correo.
-3. Entra al grupo con el boton de WhatsApp.
-4. Revisa el Google Sheet:
-   - En `Personas`, la persona debe aparecer una sola vez.
-   - `whatsapp_group_clicked` debe quedar en `TRUE`.
-   - `whatsapp_group_clicked_at` debe tener fecha/hora.
-   - En `Respuestas`, deben aparecer las 7 respuestas.
-   - En `Eventos`, debe aparecer el recorrido completo.
+2. Completa el ritual con un correo de prueba.
+3. Entra al grupo de WhatsApp desde el boton.
+4. Revisa:
+   - `Personas V2`: debe aparecer una fila.
+   - `whatsapp_group_clicked`: debe estar en `TRUE`.
+   - `Respuestas V2`: deben aparecer 7 filas asociadas a esa persona.
