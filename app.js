@@ -636,7 +636,6 @@ function panel(content, compact = false) {
 
 function render() {
   if (state.screen === "landing") return renderLanding();
-  if (state.screen === "intro") return renderIntro();
   if (state.screen === "transition") return renderTransition();
   if (state.screen === "quiz") return renderQuiz();
   if (state.screen === "milestone") return renderMilestone();
@@ -655,33 +654,13 @@ function renderLanding() {
     <div class="moon-mark"></div>
     <p class="eyebrow">Ritual interactivo</p>
     <h1>La Luna que Estás Viviendo</h1>
-    <p class="lead">Responde 7 señales y descubre qué fase lunar refleja el momento interno que estás viviendo ahora.</p>
-    <button class="primary-btn" id="startBtn">Entrar al ritual</button>
-    <p class="small-note">Al final recibes tu lectura, una práctica y tu Guía Ritual de la Próxima Luna.</p>
+    <p class="lead">Descubre en 1 minuto qué se está moviendo en ti, qué necesitas soltar y qué puede acompañarte en este momento.</p>
+    <button class="primary-btn" id="startBtn">Empezar mi lectura</button>
+    <p class="small-note">Al final recibes tu lectura, una práctica sencilla y tu Guía Ritual paso a paso para la próxima luna.</p>
     <img class="brand-wordmark footer-wordmark" src="${brand.wordmark}" alt="Nadia Hazte Caso" />
   `);
   document.getElementById("startBtn").onclick = () => {
     trackEvent(eventNames.landingCtaClicked);
-    setScreen("intro");
-  };
-}
-
-function renderIntro() {
-  markScreen("intro", eventNames.introViewed);
-  app.innerHTML = panel(`
-    <p class="eyebrow">Antes de entrar</p>
-    <h2>Lo que vas a descubrir</h2>
-    <p class="body-copy">En unos minutos vas a mirar tu momento interno con una brújula más clara:</p>
-    <ul class="receive-list" aria-label="Lo que recibes al terminar">
-      <li>la fase lunar que revela qué se está moviendo dentro de ti,</li>
-      <li>una frase para nombrar eso que tal vez venías sintiendo sin poder explicarlo,</li>
-      <li>una práctica simple para bajar la lectura al cuerpo,</li>
-      <li>y acceso a la guía paso a paso para trabajar la Luna Llena en Escorpio del 1 de mayo.</li>
-    </ul>
-    <p class="body-copy">Responde desde cómo estás hoy. Al final podrás entrar al grupo privado y llevarte la guía de la próxima luna.</p>
-    <button class="primary-btn" id="readyBtn">Estoy lista</button>
-  `, true);
-  document.getElementById("readyBtn").onclick = () => {
     trackEvent(eventNames.ritualStarted);
     setScreen("transition");
   };
@@ -864,34 +843,26 @@ function calculateResult() {
 function renderCapture() {
   markScreen("capture", eventNames.leadCaptureViewed);
   app.innerHTML = panel(`
-    <p class="eyebrow">Tu lectura lunar ya se formó</p>
-    <h2>Hay una fase esperando mostrarse</h2>
-    <p class="body-copy">Queremos enviarte tu lectura y la guía ritual para que puedas volver a ellas después. Cuéntanos cómo quieres recibirlas.</p>
+    <p class="eyebrow">Tu resultado está listo</p>
+    <h2>Tu lectura ya está lista</h2>
+    <p class="body-copy">Tus señales ya revelaron qué luna estás viviendo ahora. Déjanos tu nombre y WhatsApp para abrir tu resultado y enviarte la Guía Ritual paso a paso para la próxima luna.</p>
     ${state.error ? `<p class="error">${state.error}</p>` : ""}
     <form id="leadForm">
       <div class="field">
         <label for="name">Nombre</label>
-        <input id="name" autocomplete="name" placeholder="¿Cómo te llamas?" value="${escapeAttr(state.lead.name)}" />
+        <input id="name" autocomplete="name" placeholder="Tu nombre" value="${escapeAttr(state.lead.name)}" />
       </div>
       <div class="field">
-        <label for="email">Correo</label>
-        <input id="email" autocomplete="email" inputmode="email" placeholder="¿A qué correo te escribimos?" value="${escapeAttr(state.lead.email)}" />
-      </div>
-      <div class="field">
-        <label for="whatsapp">WhatsApp opcional</label>
+        <label for="whatsapp">WhatsApp</label>
         <div class="phone-row">
           <select id="countryCode" aria-label="Código de país">
             ${countryCodes.map((country) => `<option value="${country.code}" ${state.lead.countryCode === country.code ? "selected" : ""}>${country.label}</option>`).join("")}
           </select>
-          <input id="whatsapp" autocomplete="tel" inputmode="tel" placeholder="Tu número" value="${escapeAttr(state.lead.whatsappNumber)}" />
+          <input id="whatsapp" autocomplete="tel" inputmode="tel" placeholder="Tu número de WhatsApp" value="${escapeAttr(state.lead.whatsappNumber)}" />
         </div>
       </div>
-      <label class="check-row">
-        <input id="consent" type="checkbox" ${state.lead.consent ? "checked" : ""} />
-        <span>Acepto recibir mi lectura, la guía ritual y comunicaciones relacionadas con esta experiencia.</span>
-      </label>
-      <button class="primary-btn" type="submit">Revelar mi luna interna</button>
-      <p class="small-note">Cero spam. Puedes salirte cuando quieras.</p>
+      <button class="primary-btn" type="submit">Abrir mi lectura y recibir la guía</button>
+      <p class="small-note">La guía se entrega por WhatsApp. Cero spam. Puedes salirte cuando quieras.</p>
     </form>
   `, true);
   document.getElementById("leadForm").onsubmit = (event) => {
@@ -901,17 +872,15 @@ function renderCapture() {
     const normalizedWhatsapp = normalizeWhatsapp(countryCode, whatsappNumber);
     state.lead = {
       name: document.getElementById("name").value.trim(),
-      email: document.getElementById("email").value.trim(),
+      email: "",
       countryCode,
       whatsappNumber,
       whatsapp: normalizedWhatsapp,
-      consent: document.getElementById("consent").checked,
+      consent: true,
     };
     if (!state.lead.name) return showCaptureError("Cuéntanos tu nombre para abrir tu lectura.");
-    if (!state.lead.email) return showCaptureError("Cuéntanos a qué correo podemos enviarte tu lectura.");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.lead.email)) return showCaptureError("Revisa tu correo. Parece que falta algo.");
-    if (whatsappNumber && !normalizedWhatsapp) return showCaptureError("Revisa tu número de WhatsApp. Incluimos el código del país para guardarlo bien.");
-    if (!state.lead.consent) return showCaptureError("Acepta recibir tu lectura y la guía ritual para continuar.");
+    if (!whatsappNumber) return showCaptureError("Déjanos tu WhatsApp para abrir tu lectura y enviarte la guía.");
+    if (!normalizedWhatsapp) return showCaptureError("Revisa tu número de WhatsApp. Incluimos el código del país para guardarlo bien.");
     trackEvent(eventNames.leadSubmitted);
     setScreen("reveal");
   };
@@ -968,26 +937,19 @@ function renderResult() {
       <p class="eyebrow left">Tu Lectura</p>
       <article class="personal-reading">
         ${personalReading.map((paragraph) => `<p class="body-copy">${paragraph}</p>`).join("")}
+        <p class="body-copy"><strong>Pregunta guía:</strong> ${result.question}</p>
       </article>
     </div>
     <div class="mini-section insight-section">
       <h3>Qué está mostrando esta luna</h3>
       <ul class="insight-list">
-        ${result.shows.map((item) => `<li>${item}</li>`).join("")}
+        ${result.shows.slice(0, 3).map((item) => `<li>${item}</li>`).join("")}
       </ul>
     </div>
     <div class="trap-card">
       <p class="eyebrow left">La trampa de esta fase</p>
       <h3>${result.trapTitle}</h3>
       <p class="body-copy">${result.trap}</p>
-    </div>
-    <div class="mini-section">
-      <h3>Pregunta guía</h3>
-      <p class="body-copy">${result.question}</p>
-    </div>
-    <div class="mini-section">
-      <h3>Ritual de hoy</h3>
-      <p class="body-copy">${result.practice}</p>
     </div>
     <div class="result-closing">${result.closing}</div>
     <div class="card-transition">
@@ -1054,7 +1016,6 @@ function renderCard() {
         <img class="brand-wordmark" src="${brand.wordmark}" alt="Nadia Hazte Caso" />
       </div>
     </div>
-    <p class="small-note">Puedes guardarla solo para ti o mandársela a alguien que también esté viviendo algo parecido.</p>
     ${state.cardNotice ? `<p class="notice">${state.cardNotice}</p>` : ""}
     <div class="card-actions">
       <button class="utility-btn" id="copyCard" aria-label="Guardar mi carta">
@@ -1067,16 +1028,12 @@ function renderCard() {
       </button>
     </div>
     <div class="guide-offer">
-      <p class="eyebrow left">Luna Llena en Escorpio · 1 de mayo</p>
-      <h3>Tu lectura no termina aquí.</h3>
-      <p class="body-copy">La próxima luna viene a mover lo que ya no puedes seguir maquillando: emociones, apegos, verdades incómodas y cierres pendientes.</p>
-      <p class="body-copy">Preparé una guía ritual para acompañarte con escritura, cuerpo y un cierre simple para soltar lo que esta Luna Llena en Escorpio despierte en ti.</p>
-      <div class="offer-promise">
-        <span aria-hidden="true">↓</span>
-        <p>La voy a entregar dentro del grupo privado de WhatsApp antes del 1 de mayo.</p>
-      </div>
-      <button class="primary-btn" id="openGuideGroup">Quiero recibir mi guía lunar</button>
-      <p class="small-note">Entras al grupo privado y ahí recibirás tu primera guía de luna.</p>
+      <p class="eyebrow left">Superluna en Tauro · 16 de mayo</p>
+      <h3>Reclama tu guía gratuita</h3>
+      <p class="body-copy">La Luna Nueva en Tauro del 16 de mayo abre una ventana corta para sembrar algo más estable: cuerpo, valor, deseo, dinero, calma y decisiones que sí puedas sostener.</p>
+      <p class="body-copy">Esta guía solo sirve para esta luna: En el grupo privado te entrego la Guía Ritual paso a paso de esta Superluna antes de que pase su momento.</p>
+      <button class="primary-btn" id="openGuideGroup">Entrar a WhatsApp y reclamar mi guía</button>
+      <p class="small-note">Gratis por WhatsApp. Puedes silenciar o salir cuando quieras.</p>
     </div>
     <div class="monthly-return">
       <p class="eyebrow left">Vuelve a tu brújula</p>
