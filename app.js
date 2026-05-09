@@ -1032,7 +1032,7 @@ function renderCard() {
       <h3>Reclama tu guía gratuita</h3>
       <p class="body-copy">La Luna Nueva en Tauro del 16 de mayo abre una ventana corta para sembrar algo más estable: cuerpo, valor, deseo, dinero, calma y decisiones que sí puedas sostener.</p>
       <p class="body-copy">Esta guía solo sirve para esta luna: En el grupo privado te entrego la Guía Ritual paso a paso de esta Superluna antes de que pase su momento.</p>
-      <button class="primary-btn" id="openGuideGroup">Entrar a WhatsApp y reclamar mi guía</button>
+      <button class="primary-btn" id="openGuideGroup">Entrar al Círculo Lunar y reclamar mi guía</button>
       <p class="small-note">Gratis por WhatsApp. Puedes silenciar o salir cuando quieras.</p>
     </div>
     <div class="monthly-return">
